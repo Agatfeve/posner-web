@@ -1,43 +1,101 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="utf-8">
-  <title>Orientation de l'attention</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/jspsych@6.3.1/css/jspsych.css">
-  <script src="https://cdn.jsdelivr.net/npm/jspsych@6.3.1/jspsych.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/jspsych@6.3.1/plugins/jspsych-html-keyboard-response.js"></script>
-
-  <style>
-    body { background: #000; color: #fff; font-family: Arial, sans-serif; }
-    .jspsych-content { color: #fff; max-width: 900px; }
-    .stage { position: relative; width: 800px; height: 400px; margin: 0 auto; }
-    .fix, .arrow { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
-    .fix { font-size: 40px; }
-    .arrow { font-size: 90px; }
-    .sq { position: absolute; top: 50%; width: 30px; height: 30px; margin-top: -15px; background: #fff; }
-  </style>
+<meta charset="utf-8">
+<title>Orientation de l'attention</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #fff; font-family: Arial, sans-serif; overflow: hidden; }
+  #root { position: relative; width: 100vw; height: 100vh; }
+  .text { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 800px; max-width: 92vw; font-size: 18px; line-height: 1.5; }
+  .center { text-align: center; }
+  .stage { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+  .fix, .arrow, .sq { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); }
+  .fix { font-size: 40px; }
+  .arrow { font-size: 90px; }
+  .sq { width: 30px; height: 30px; background: #fff; }
+</style>
 </head>
 <body>
+<div id="root"></div>
 <script>
 // ======================= PARAMÈTRES =======================
 const SHEET_URL = "https://script.google.com/macros/s/AKfycbzSVs111WQMu-W4RGR2jxr8Atn1uwlh5YMRpUlYDYrKVctCKJbb-NGWZAQzcqpR9POs-w/exec";
-const ECC_PX = 200;      // distance centre-cible (pixels)
-const SQ_PX = 30;        // taille du carré (pixels)
-const N_PRACTICE = 8;    // essais d'entraînement (non enregistrés)
-const N_BLOCKS = 2;      // blocs expérimentaux
+const ECC_PX = 200;       // distance centre-cible (pixels)
+const N_PRACTICE = 8;     // essais d'entraînement (non enregistrés)
+const N_BLOCKS = 2;       // blocs expérimentaux
 
+const root = document.getElementById("root");
 let P = { participant: "", age: "" };
 
-// ======================= AFFICHAGE =======================
-const stage = html => `<div class="stage">${html}</div>`;
-const fixation = () => `<div class="fix">+</div>`;
-const arrow = cue => `<div class="arrow">${cue === "L" ? "←" : "→"}</div>`;
-const square = side => {
-  const x = 400 + (side === "R" ? ECC_PX : -ECC_PX) - SQ_PX / 2;
+// ======================= OUTILS =======================
+function show(html) { root.innerHTML = html; }
+function stage(inner) { return `<div class="stage">${inner}</div>`; }
+const FIX = `<div class="fix">+</div>`;
+function arrowHTML(c) { return `<div class="arrow">${c === "L" ? "←" : "→"}</div>`; }
+function sqHTML(side) {
+  const x = side === "R" ? ECC_PX : -ECC_PX;
   return `<div class="sq" style="left:${x}px"></div>`;
-};
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ======================= ENVOI DES DONNÉES =======================
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Attend une touche parmi la liste, renvoie la touche appuyée
+function waitKey(keys) {
+  return new Promise(resolve => {
+    function h(e) {
+      if (e.repeat) return;
+      const k = e.key.toLowerCase();
+      if (!keys.includes(k)) return;
+      document.removeEventListener("keydown", h);
+      resolve(k);
+    }
+    document.addEventListener("keydown", h);
+  });
+}
+
+// Pendant la fixation ou l'indice : renvoie true si ESPACE est appuyé avant la fin
+function waitPhase(ms) {
+  return new Promise(resolve => {
+    function h(e) {
+      if (e.repeat || e.key !== " ") return;
+      finish(true);
+    }
+    function finish(v) {
+      document.removeEventListener("keydown", h);
+      clearTimeout(tm);
+      resolve(v);
+    }
+    document.addEventListener("keydown", h);
+    const tm = setTimeout(() => finish(false), ms);
+  });
+}
+
+// Pendant la cible : renvoie le temps de réaction (ms), ou null si pas de réponse
+function waitTarget(ms) {
+  return new Promise(resolve => {
+    const t0 = performance.now();
+    function h(e) {
+      if (e.repeat || e.key !== " ") return;
+      finish(performance.now() - t0);
+    }
+    function finish(v) {
+      document.removeEventListener("keydown", h);
+      clearTimeout(tm);
+      resolve(v);
+    }
+    document.addEventListener("keydown", h);
+    const tm = setTimeout(() => finish(null), ms);
+  });
+}
+
+// ======================= DONNÉES =======================
 function send(row) {
   fetch(SHEET_URL, {
     method: "POST",
@@ -47,7 +105,20 @@ function send(row) {
   }).catch(() => {});
 }
 
+function record(t, block, trialNo, practice, status, rt) {
+  if (practice) return;
+  send({
+    participant: P.participant, age: P.age,
+    date: new Date().toISOString(),
+    block: block, trial: trialNo,
+    cue: t.cue, target_side: t.target, condition: t.condition,
+    rt_ms: rt === null ? "" : Math.round(rt),
+    status: status
+  });
+}
+
 // ======================= PLAN DES ESSAIS =======================
+// Par bloc : 24 valides et 6 invalides par côté, plus 12 neutres par côté
 function buildBlock() {
   const trials = [];
   for (const side of ["L", "R"]) {
@@ -57,67 +128,49 @@ function buildBlock() {
   }
   for (const side of ["L", "R"])
     for (let i = 0; i < 12; i++) trials.push({ cue: "N", target: side, condition: "neutral" });
-  return jsPsych.randomization.shuffle(trials);
+  return shuffle(trials);
 }
 
-// Un essai = fixation (durée aléatoire) + indice (1000 ms) + cible (jusqu'à réponse)
-function makeTrial(t, block, trialNo, practice) {
-  let early = false;
+// ======================= UN ESSAI =======================
+async function runTrial(t, block, trialNo, practice) {
+  // 1. Fixation (1000 à 2000 ms, durée aléatoire)
+  show(stage(FIX));
+  let early = await waitPhase(1000 + Math.floor(Math.random() * 1001));
 
-  const save = (status, rt) => {
-    if (practice) return;
-    send({
-      participant: P.participant, age: P.age,
-      date: new Date().toISOString(),
-      block: block, trial: trialNo,
-      cue: t.cue, target_side: t.target, condition: t.condition,
-      rt_ms: rt === null ? "" : Math.round(rt),
-      status: status
-    });
-  };
+  // 2. Indice central (1000 ms), flèche ou rien
+  if (!early) {
+    show(stage(FIX + (t.cue === "N" ? "" : arrowHTML(t.cue))));
+    early = await waitPhase(1000);
+  }
 
-  return [
-    { // 1. fixation : une réponse ici est une anticipation
-      type: jsPsychHtmlKeyboardResponse,
-      stimulus: stage(fixation()),
-      choices: [" "],
-      response_ends_trial: false,
-      trial_duration: jsPsych.randomization.randomInt(1000, 2000),
-      on_finish: d => { if (d.response) { early = true; save("early", null); } }
-    },
-    { // 2. indice central (flèche, ou rien si neutre)
-      type: jsPsychHtmlKeyboardResponse,
-      stimulus: stage(fixation() + (t.cue === "N" ? "" : arrow(t.cue))),
-      choices: [" "],
-      response_ends_trial: false,
-      trial_duration: 1000,
-      conditional_function: () => !early,
-      on_finish: d => { if (d.response) { early = true; save("early", null); } }
-    },
-    { // 3. cible : le participant appuie dès qu'il voit le carré
-      type: jsPsychHtmlKeyboardResponse,
-      stimulus: stage(fixation() + square(t.target)),
-      choices: [" "],
-      response_ends_trial: true,
-      trial_duration: 1500,
-      conditional_function: () => !early,
-      on_finish: d => {
-        if (d.response === null) save("miss", null);
-        else if (d.rt < 100) save("anticipation", d.rt);
-        else save("ok", d.rt);
-      }
-    }
-  ];
+  if (early) {
+    record(t, block, trialNo, practice, "early", null);
+    show(`<div class="text center">Trop tôt : attendez l'apparition du carré.</div>`);
+    await sleep(800);
+    show("");
+    return;
+  }
+
+  // 3. Cible : le participant appuie dès qu'il voit le carré
+  show(stage(FIX + sqHTML(t.target)));
+  const rt = await waitTarget(1500);
+  const status = rt === null ? "miss" : (rt < 100 ? "anticipation" : "ok");
+  record(t, block, trialNo, practice, status, rt);
+
+  if (practice) {
+    const msg = rt === null ? "Pas de réponse." : (rt < 100 ? "Trop rapide." : `${Math.round(rt)} ms`);
+    show(`<div class="text center">${msg}</div>`);
+    await sleep(800);
+  }
+  show("");
+  await sleep(300);
 }
 
 // ======================= DÉROULEMENT =======================
-const timeline = [];
-
-// Consentement et identifiant (uniquement avec le plugin clavier)
-timeline.push({
-  type: jsPsychHtmlKeyboardResponse,
-  stimulus: `
-    <div style="max-width:800px; margin:auto; text-align:left; font-size:18px;">
+async function main() {
+  // Consentement
+  show(`
+    <div class="text">
       <h2>Orientation de l'attention spatiale</h2>
       <p>Un point de fixation (+) apparaît au centre de l'écran. Gardez les yeux sur ce point pendant toute l'expérience.</p>
       <p>Parfois une flèche apparaît : elle indique le côté où le carré blanc est le plus probable, mais elle peut se tromper. Parfois, aucune flèche n'apparaît.</p>
@@ -126,56 +179,55 @@ timeline.push({
       <p>Vos réponses sont anonymes. Seuls les temps de réaction et les conditions des essais sont enregistrés. Vous pouvez arrêter à tout moment en fermant la page.</p>
       <p><strong>Acceptez-vous de participer ?</strong></p>
       <p>Appuyez sur <strong>O</strong> pour accepter, ou sur <strong>N</strong> pour refuser.</p>
-    </div>`,
-  choices: ["o", "n"],
-  on_finish: d => {
-    if (d.response === "n") {
-      jsPsych.endExperiment("<p>Merci d'avoir pris le temps de regarder cette expérience.</p>");
-      return;
+    </div>`);
+  const key = await waitKey(["o", "n"]);
+  if (key === "n") {
+    show(`<div class="text center">Merci d'avoir pris le temps de regarder cette expérience.</div>`);
+    return;
+  }
+
+  // Identifiant (fenêtre simple)
+  const pid = (prompt("Identifiant anonyme (ex. P01) :") || "").trim();
+  const age = (prompt("Âge (facultatif) :") || "").trim();
+  P = { participant: pid || ("anonyme-" + Date.now()), age: age };
+
+  // Entraînement
+  show(`<div class="text center">
+    <p>ENTRAÎNEMENT</p>
+    <p>Quelques essais pour vous habituer à la tâche. Ils ne seront pas enregistrés.</p>
+    <p>[ESPACE pour continuer]</p></div>`);
+  await waitKey([" "]);
+
+  const practice = buildBlock().slice(0, N_PRACTICE);
+  for (let i = 0; i < practice.length; i++) {
+    await runTrial(practice[i], 0, i + 1, true);
+  }
+
+  // Expérience
+  show(`<div class="text center">
+    <p>L'EXPÉRIENCE COMMENCE</p>
+    <p>Les essais suivants sont enregistrés.</p>
+    <p>[ESPACE pour continuer]</p></div>`);
+  await waitKey([" "]);
+
+  for (let b = 1; b <= N_BLOCKS; b++) {
+    const trials = buildBlock();
+    for (let i = 0; i < trials.length; i++) {
+      await runTrial(trials[i], b, i + 1, false);
     }
-    // Identifiant saisi dans une fenêtre simple
-    const pid = (prompt("Identifiant anonyme (ex. P01) :") || "").trim();
-    const age = (prompt("Âge (facultatif) :") || "").trim();
-    P = { participant: pid || "anonyme-" + Date.now(), age: age };
+    if (b < N_BLOCKS) {
+      show(`<div class="text center">
+        <p>PAUSE (bloc ${b} sur ${N_BLOCKS} terminé)</p>
+        <p>Reposez-vous quelques instants.</p>
+        <p>[ESPACE pour continuer]</p></div>`);
+      await waitKey([" "]);
+    }
   }
-});
 
-// Entraînement
-timeline.push({
-  type: jsPsychHtmlKeyboardResponse,
-  stimulus: "<p>ENTRAÎNEMENT</p><p>Quelques essais pour vous habituer à la tâche. Ils ne seront pas enregistrés.</p><p>[ESPACE pour continuer]</p>",
-  choices: [" "]
-});
-jsPsych.randomization.sampleWithoutReplacement(buildBlock(), N_PRACTICE)
-  .forEach((t, i) => timeline.push(...makeTrial(t, 0, i + 1, true)));
-
-timeline.push({
-  type: jsPsychHtmlKeyboardResponse,
-  stimulus: "<p>L'EXPÉRIENCE COMMENCE</p><p>Les essais suivants sont enregistrés.</p><p>[ESPACE pour continuer]</p>",
-  choices: [" "]
-});
-
-// Blocs expérimentaux
-for (let b = 1; b <= N_BLOCKS; b++) {
-  buildBlock().forEach((t, i) => timeline.push(...makeTrial(t, b, i + 1, false)));
-  if (b < N_BLOCKS) {
-    timeline.push({
-      type: jsPsychHtmlKeyboardResponse,
-      stimulus: `<p>PAUSE (bloc ${b} sur ${N_BLOCKS} terminé)</p><p>Reposez-vous quelques instants.</p><p>[ESPACE pour continuer]</p>`,
-      choices: [" "]
-    });
-  }
+  show(`<div class="text center"><p>Merci pour votre participation !</p></div>`);
 }
 
-// Fin
-timeline.push({
-  type: jsPsychHtmlKeyboardResponse,
-  stimulus: "<p>Merci pour votre participation !</p>",
-  choices: "NO_KEYS",
-  trial_duration: 4000
-});
-
-jsPsych.init({ timeline: timeline });
+main();
 </script>
 </body>
 </html>
