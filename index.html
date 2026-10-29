@@ -27,7 +27,7 @@ const SQ_PX = 30;        // taille du carré (pixels)
 const N_PRACTICE = 8;    // essais d'entraînement (non enregistrés)
 const N_BLOCKS = 2;      // blocs expérimentaux
 
-let P = { participant: "", age: "" };   // rempli à l'écran d'identification
+let P = { participant: "", age: "" };
 
 // ======================= AFFICHAGE =======================
 const stage = html => `<div class="stage">${html}</div>`;
@@ -49,7 +49,6 @@ function send(row) {
 }
 
 // ======================= PLAN DES ESSAIS =======================
-// Par bloc : 24 valides et 6 invalides par côté, plus 12 neutres par côté
 function buildBlock() {
   const trials = [];
   for (const side of ["L", "R"]) {
@@ -143,7 +142,8 @@ timeline.push({
   ],
   button_label: "Continuer",
   on_finish: d => {
-    P = { participant: d.response.participant.trim(), age: (d.response.age || "").trim() };
+    const r = JSON.parse(d.responses);
+    P = { participant: r.participant.trim(), age: (r.age || "").trim() };
   }
 });
 
