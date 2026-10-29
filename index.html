@@ -114,36 +114,30 @@ function makeTrial(t, block, trialNo, practice) {
 // ======================= DÉROULEMENT =======================
 const timeline = [];
 
-// Consentement
+// Consentement et identifiant (uniquement avec le plugin clavier)
 timeline.push({
-  type: jsPsychHtmlButtonResponse,
+  type: jsPsychHtmlKeyboardResponse,
   stimulus: `
     <div style="max-width:800px; margin:auto; text-align:left; font-size:18px;">
       <h2>Orientation de l'attention spatiale</h2>
       <p>Un point de fixation (+) apparaît au centre de l'écran. Gardez les yeux sur ce point pendant toute l'expérience.</p>
       <p>Parfois une flèche apparaît : elle indique le côté où le carré blanc est le plus probable, mais elle peut se tromper. Parfois, aucune flèche n'apparaît.</p>
       <p>Dès que le carré apparaît, appuyez sur la barre ESPACE le plus vite possible.</p>
-      <p>Durée : environ 10 minutes. Utilisez un ordinateur (pas un téléphone) avec un clavier.</p>
+      <p>Durée : environ 10 minutes. Utilisez un ordinateur avec un clavier.</p>
       <p>Vos réponses sont anonymes. Seuls les temps de réaction et les conditions des essais sont enregistrés. Vous pouvez arrêter à tout moment en fermant la page.</p>
       <p><strong>Acceptez-vous de participer ?</strong></p>
+      <p>Appuyez sur <strong>O</strong> pour accepter, ou sur <strong>N</strong> pour refuser.</p>
     </div>`,
-  choices: ["J'accepte", "Je refuse"],
+  choices: ["o", "n"],
   on_finish: d => {
-    if (d.response === 1) jsPsych.endExperiment("<p>Merci d'avoir pris le temps de regarder cette expérience.</p>");
-  }
-});
-
-// Identifiant anonyme
-timeline.push({
-  type: jsPsychSurveyText,
-  questions: [
-    { prompt: "Identifiant anonyme (ex. P01) :", name: "participant", required: true },
-    { prompt: "Âge (facultatif) :", name: "age", required: false }
-  ],
-  button_label: "Continuer",
-  on_finish: d => {
-    const r = JSON.parse(d.responses);
-    P = { participant: r.participant.trim(), age: (r.age || "").trim() };
+    if (d.response === "n") {
+      jsPsych.endExperiment("<p>Merci d'avoir pris le temps de regarder cette expérience.</p>");
+      return;
+    }
+    // Identifiant saisi dans une fenêtre simple
+    const pid = (prompt("Identifiant anonyme (ex. P01) :") || "").trim();
+    const age = (prompt("Âge (facultatif) :") || "").trim();
+    P = { participant: pid || "anonyme-" + Date.now(), age: age };
   }
 });
 
